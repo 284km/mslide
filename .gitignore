@@ -1,0 +1,6 @@
+.mere_modules/
+*.c
+*.wat
+*.wasm
+mslide
+_out/

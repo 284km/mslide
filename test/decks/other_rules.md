@@ -1,0 +1,7 @@
+# rules
+
+***
+
+___
+
+not cuts

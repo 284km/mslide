@@ -1,0 +1,22 @@
+// mslide — markdown to a deck.
+//
+//   mslide deck.md out.html
+//
+// One file out, everything inline, no script and no fetches: it opens from a
+// memory stick with the network off, and it prints one slide to a page.
+import "./html.mere";
+
+let usage = fn () ->
+  let _ = print "usage: mslide <deck.md> [out.html]" in
+  exit 2;
+
+match args () with
+| Nil -> usage ()
+| Cons (src, rest) ->
+  let out = match rest with Cons (o, _) -> o | Nil -> "slides.html" in
+  if file_exists src == false then
+    let _ = print ("mslide: no such file: " ++ src) in exit 1
+  else
+    let d = Deck.of_lines (read_lines src) in
+    let _ = write_file out (DeckHtml.render d) in
+    print (src ++ " -> " ++ out ++ " (" ++ show (Deck.count d) ++ " slides)")

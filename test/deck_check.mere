@@ -1,0 +1,91 @@
+// deck_check.mere — cutting a document into slides creates and destroys nothing.
+//
+// No oracle is needed for this and none would be honest: the question is not
+// "does this match some other implementation" but "is the deck the same document
+// it was". So the document is its own answer. Strip the cuts and the blanks from
+// the parse, strip the blanks from every slide, lay the two out end to end, and
+// they have to be the same sequence.
+//
+// It catches the two ways a fold over a list goes wrong — a block dropped at a
+// boundary, a block emitted into two slides — and it catches them by name,
+// because the summary says which block and in what order.
+
+import "../deck.mere";
+
+// Enough of a block to tell it from its neighbours, and from a copy of itself.
+let summary = fn (b: block) ->
+  match b with
+  | Heading (l, t) -> "h" ++ show l ++ ":" ++ t
+  | Para ls -> "p:" ++ str_join "/" ls
+  | Hr src -> "hr:" ++ src
+  | Fence (lang, body, closed) ->
+    "fence:" ++ lang ++ ":" ++ show (list_len body) ++ ":" ++ show closed
+  | Quote ts -> "quote:" ++ str_join "/" ts
+  | Table rows -> "table:" ++ show (list_len rows)
+  | Bullets items -> "ul:" ++ show (list_len items)
+  | Blank -> "blank";
+
+// Blanks are formatting and cuts are structure; neither is content, so both go.
+let content = fn (bs: block list) ->
+  let keep = list_filter bs (fn (b: block) ->
+    match b with
+    | Blank -> false
+    | Hr src -> Deck.is_cut src == false
+    | _ -> true) in
+  list_map keep summary;
+
+// The expected slide count, from the table, or -1 if the file is not listed.
+let expected_for = fn (base: str) ->
+  let rec go = fn (ls: str list) ->
+    match ls with
+    | Nil -> -1
+    | Cons (l, rest) ->
+      let parts = list_filter (str_split l " ") (fn (w: str) -> str_len w > 0) in
+      match parts with
+      | Cons (f, Cons (n, _)) -> if f == base then int_of_str n else go rest
+      | _ -> go rest
+  in go (read_lines "test/decks/expected.txt");
+
+let basename_of = fn (path: str) ->
+  let n = str_len path in
+  let rec back = fn (i: int) ->
+    if i <= 0 then 0
+    else if char_at path (i - 1) == "/" then i
+    else back (i - 1)
+  in substring path (back n) n;
+
+let check_file = fn (path: str) ->
+  let lines = read_lines path in
+  let doc = Md.parse lines in
+  let d = Deck.of_blocks doc in
+  let before = str_join "|" (content doc) in
+  let after =
+    str_join "|" (list_concat (list_map d.slides (fn (s: slide) -> content s.blocks))) in
+  let name = path in
+  let _ = if before == after then
+            print ("ok    " ++ name ++ "  " ++ show (Deck.count d) ++ " slides, content preserved")
+          else
+            let _ = print ("MISMATCH " ++ name) in
+            let _ = print ("  before: " ++ before) in
+            let _ = print ("  after : " ++ after) in () in
+  // What the cut rule is supposed to do, said outside the code that does it.
+  let base = basename_of path in
+  let want = expected_for base in
+  let got = Deck.count d in
+  let _ = if want < 0 then print ("MISMATCH " ++ base ++ ": not listed in expected.txt")
+          else if want != got then
+            print ("MISMATCH " ++ base ++ ": expected " ++ show want
+                   ++ " slides, got " ++ show got)
+          else () in
+  // A slide with nothing on it is a slide that should not have been made.
+  list_iter d.slides (fn (s: slide) ->
+    match s.blocks with
+    | Nil -> print ("MISMATCH " ++ name ++ ": an empty slide was emitted")
+    | Cons (_h, _t) -> ());
+
+let rec go = fn (ps: str list) ->
+  match ps with
+  | Nil -> ()
+  | Cons (p, rest) -> let _ = check_file p in go rest;
+
+go (args ())

@@ -1,0 +1,13 @@
+# How many slides each deck must produce. Written down rather than derived,
+# because the content check below uses Deck.is_cut to decide what a cut is and
+# therefore cannot notice Deck.is_cut being wrong. This can.
+#
+#   <file>  <slides>
+basic.md         3
+blanks.md        1
+double_cut.md    2
+empty.md         0
+leading_cut.md   1
+other_rules.md   1
+single.md        1
+trailing_cut.md  1

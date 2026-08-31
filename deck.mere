@@ -1,0 +1,87 @@
+// deck.mere — a markdown document, cut into slides.
+//
+// A deck is not a new parse. `Md.parse` already turned the source into blocks,
+// and a slide boundary is one of those blocks: the thematic break. So this file
+// has no scanner, no state machine and no idea what a heading looks like — it
+// folds a list.
+//
+// Which break, though. `---` and `***` are the same block to a reader of HTML
+// and different characters to the person who typed them, so the document keeps
+// the rule as written and this is where that pays: `---` cuts, `***` and `___`
+// stay in the slide as a rule. Marp made the same choice and decks written for
+// it carry over.
+
+import "github.com/284km/mere-markdown/parse.mere";
+
+type slide = { title: str, blocks: block list };
+type deck = { title: str, slides: slide list };
+
+module Deck {
+
+// `---` cuts. Anything else a thematic break can be written as does not.
+let is_cut = fn (src: str) ->
+  let n = str_len src in
+  if n < 3 then false
+  else char_at src 0 == "-";
+
+// The first heading in a slide names it. Used for the page title and, later, for
+// the presenter's list; a slide with no heading is not an error, it is a slide
+// with a picture on it.
+let title_of = fn (bs: block list) ->
+  let rec go = fn (rest: block list) ->
+    match rest with
+    | Nil -> ""
+    | Cons (b, more) ->
+      match b with
+      | Heading (_lvl, t) -> t
+      | _ -> go more
+  in go bs;
+
+// Blank blocks exist so that plain text can be line for line with its source.
+// A slide has no such obligation, and a deck whose first slide begins with four
+// blank lines is a deck that was edited, not one that meant it.
+let rec trim_blanks = fn (bs: block list) ->
+  match bs with
+  | Nil -> Nil
+  | Cons (b, rest) ->
+    match b with
+    | Blank -> trim_blanks rest
+    | _ -> bs;
+
+let strip = fn (bs: block list) ->
+  list_rev (trim_blanks (list_rev (trim_blanks bs)));
+
+let of_blocks = fn (bs: block list) ->
+  // Slides are built in reverse and turned around once, and so is each slide's
+  // block list. An empty slide is dropped rather than rendered: a deck that ends
+  // with `---` means "that was the last one", not "and now a blank one".
+  let rec go = fn (rest: block list) -> fn (cur: block list) -> fn (acc: slide list) ->
+    let close = fn (a: slide list) ->
+      let bl = strip (list_rev cur) in
+      match bl with
+      | Nil -> a
+      | Cons (_h, _t) -> Cons (slide { title = title_of bl, blocks = bl }, a) in
+    match rest with
+    | Nil -> list_rev (close acc)
+    | Cons (b, more) ->
+      match b with
+      | Hr src -> if is_cut src then go more Nil (close acc)
+                  else go more (Cons (b, cur)) acc
+      | _ -> go more (Cons (b, cur)) acc
+  in
+  let ss = go bs Nil Nil in
+  let dt = match ss with
+    | Nil -> ""
+    | Cons (s, _rest) -> s.title in
+  deck { title = dt, slides = ss };
+
+let of_lines = fn (lines: str list) -> of_blocks (Md.parse lines);
+
+let count = fn (d: deck) ->
+  let rec go = fn (ss: slide list) -> fn (n: int) ->
+    match ss with
+    | Nil -> n
+    | Cons (_s, rest) -> go rest (n + 1)
+  in go d.slides 0;
+
+};   // end of `module Deck`

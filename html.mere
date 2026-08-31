@@ -1,0 +1,92 @@
+// html.mere — a deck, as one HTML file that needs no JavaScript.
+//
+// Navigation is CSS. A scroll-snapping document with one full-height section per
+// slide moves a slide at a time under the arrow keys, Page Down and the space
+// bar, because those are what a browser already does to a document — there is
+// nothing here to bind them to.
+//
+// That is not only a preference. A deck with no script is a deck a browser that
+// has no script engine can show, which is the browser this project's sibling is
+// writing, and it means the page and the window renderer can be pointed at the
+// same file and asked whether they agree.
+//
+// Everything is inline: one file, no fetches, so it works from a memory stick
+// with the network off.
+
+import "github.com/284km/mere-markdown/to_html.mere";
+import "./deck.mere";
+
+module DeckHtml {
+
+let esc = fn (s: str) -> MarkdownHtml.escape_html s;
+
+// `\{` because a bare brace opens interpolation in a Mere string literal.
+let style = fn () ->
+  "html, body \{ margin: 0; padding: 0; height: 100%; }\n"
+  ++ "html \{ scroll-snap-type: y mandatory; scroll-behavior: smooth; }\n"
+  ++ "body \{ font: 16px/1.6 system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;\n"
+  ++ "  color: #16181d; background: #fff; }\n"
+  // `position: relative` is not decoration: without a positioned ancestor the
+  // slide number below resolves against the document, so every slide's number
+  // would pile up at the bottom of the last one.
+  ++ "section \{ box-sizing: border-box; position: relative; height: 100vh;\n"
+  ++ "  scroll-snap-align: start;\n"
+  ++ "  display: flex; flex-direction: column; justify-content: center;\n"
+  ++ "  padding: 6vh 8vw; border-bottom: 1px solid #e6e8ec; overflow: hidden; }\n"
+  ++ ".n \{ position: absolute; right: 3vw; bottom: 3vh; font-size: 1.6vh; color: #98a0ad; }\n"
+  ++ "h1 \{ font-size: 6.4vh; line-height: 1.15; margin: 0 0 3vh; letter-spacing: -0.01em; }\n"
+  ++ "h2 \{ font-size: 4.8vh; line-height: 1.2; margin: 0 0 2.4vh; }\n"
+  ++ "h3 \{ font-size: 3.4vh; margin: 0 0 2vh; }\n"
+  ++ "h4, h5, h6 \{ font-size: 2.6vh; margin: 0 0 1.6vh; }\n"
+  ++ "p, li \{ font-size: 2.8vh; margin: 0 0 1.6vh; }\n"
+  ++ "ul, ol \{ margin: 0 0 2vh; padding-left: 1.2em; }\n"
+  ++ "li \{ margin: 0 0 0.8vh; }\n"
+  ++ "code \{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n"
+  ++ "  font-size: 0.92em; background: #f4f5f7; padding: 0.1em 0.3em; border-radius: 3px; }\n"
+  ++ "pre \{ margin: 0 0 2vh; padding: 2vh 2.4vh; background: #f4f5f7; border-radius: 6px;\n"
+  ++ "  overflow-x: auto; max-height: 62vh; }\n"
+  ++ "pre code \{ background: none; padding: 0; font-size: 2.1vh; line-height: 1.45; }\n"
+  ++ "blockquote \{ margin: 0 0 2vh; padding-left: 1em; border-left: 3px solid #c9ced8;\n"
+  ++ "  color: #4a5160; font-size: 2.6vh; }\n"
+  ++ "table \{ border-collapse: collapse; font-size: 2.2vh; margin: 0 0 2vh; }\n"
+  ++ "th, td \{ border: 1px solid #d7dbe2; padding: 0.5vh 1.2vh; text-align: left; }\n"
+  ++ "hr \{ border: 0; border-top: 2px solid #d7dbe2; width: 100%; margin: 2vh 0; }\n"
+  ++ "img \{ max-width: 100%; max-height: 55vh; }\n"
+  ++ "a \{ color: #1a53c0; }\n"
+  // A slide is a slide on a phone too; vh units already do most of it, but the
+  // padding has to give way or a title has nowhere to go.
+  ++ "@media (max-width: 640px) \{ section \{ padding: 5vh 6vw; } }\n"
+  // Printing is how a deck becomes a PDF in somebody else's hands. One slide per
+  // page, landscape, and no scroll snapping to fight the paginator.
+  ++ "@media print \{\n"
+  ++ "  html \{ scroll-snap-type: none; }\n"
+  ++ "  section \{ height: 100vh; page-break-after: always; border-bottom: 0; }\n"
+  ++ "  .n \{ display: none; }\n"
+  ++ "}\n";
+
+let slide_html = fn (s: slide) -> fn (n: int) -> fn (total: int) ->
+  "<section id=\"s" ++ show n ++ "\">\n"
+  ++ MarkdownHtml.to_html s.blocks
+  ++ "<div class=\"n\">" ++ show n ++ " / " ++ show total ++ "</div>\n"
+  ++ "</section>\n";
+
+let render = fn (d: deck) ->
+  let total = Deck.count d in
+  let out = strbuf_new () in
+  let _ = strbuf_push out
+    ("<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n"
+     ++ "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+     ++ "<title>" ++ esc d.title ++ "</title>\n<style>\n" ++ style () ++ "</style>\n"
+     ++ "</head>\n<body>\n") in
+  let state = map_new () in
+  let _ = map_set state "n" 0 in
+  let _ = list_iter d.slides (fn (s: slide) ->
+    let n = map_get state "n" + 1 in
+    let _ = map_set state "n" n in
+    let _ = strbuf_push out (slide_html s n total) in ()) in
+  let _ = strbuf_push out "</body>\n</html>\n" in
+  strbuf_to_str out;
+
+let of_lines = fn (lines: str list) -> render (Deck.of_lines lines);
+
+};   // end of `module DeckHtml`
