@@ -79,5 +79,9 @@ else
   note "skip  no clang, so compiled == interpreted was not checked"
 fi
 
+# 6. The one part a file comparison cannot reach: pixels on a screen. Compiled,
+#    headless under SDL's dummy driver, and skipped where SDL is not installed.
+if sh scripts/present_check.sh; then :; else bad "present_check"; fi
+
 [ "$fail" -eq 0 ] || { echo "check: FAILED" >&2; exit 1; }
 echo "check: ok"

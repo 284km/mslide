@@ -38,3 +38,10 @@ git = "https://github.com/merelang/mere"
 subdir = "contrib/unicode"
 rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778"
 hash = "md5:08722aabe549da0e58f92365ab9d31d8"
+
+[[package]]
+name = "window"
+git = "https://github.com/merelang/mere"
+subdir = "contrib/window"
+rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778"
+hash = "md5:460f22decfeaa367f32c1855de2eeafb"

@@ -9,3 +9,4 @@ font = { git = "https://github.com/merelang/mere", subdir = "contrib/font", rev 
 raster = { git = "https://github.com/merelang/mere", subdir = "contrib/raster", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }
 unicode = { git = "https://github.com/merelang/mere", subdir = "contrib/unicode", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }
 png = { git = "https://github.com/284km/mpng", rev = "3b964e279e78dd4919fdefc607090a0943b9273f" }
+window = { git = "https://github.com/merelang/mere", subdir = "contrib/window", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }

@@ -20,6 +20,11 @@ mere -c mslide.mere > m.c && clang -O2 m.c -o mslide
 ./mslide deck.md out.html                     # one page, no script
 ./mslide --png deck.md out/                   # one image per slide, no browser
 ./mslide --pdf deck.md out.pdf                # what a conference asks for
+
+mere -c present.mere > p.c && clang -O2 -w $(sdl2-config --cflags) p.c \
+    -o mspresent $(sdl2-config --libs) -lm
+./mspresent deck.md                           # the deck, in a window
+
 sh scripts/check.sh
 ```
 
@@ -28,7 +33,7 @@ sh scripts/check.sh
 | deck IR + HTML page | done |
 | PNG per slide | done |
 | PDF | done |
-| presenter binary (a window, arrow keys, a clock) | not started |
+| presenter binary (a window, arrow keys, a clock) | done |
 
 **Build it before you draw with it.** Encoding one small PNG takes the
 interpreter forty-five minutes and the compiled program no time worth measuring,
@@ -92,6 +97,23 @@ reports 87 disagreeing pixels against the old rule and none against the new.
 Nothing in this repository could have found that by testing itself. It took
 drawing something.
 
+## The presenter is the point
+
+`./mspresent deck.md` opens a window and shows the deck. Arrows, space and the
+page keys move a slide at a time, home and end jump, `q` or escape leaves. The
+corner carries the slide number and how long you have been talking.
+
+The room needs **no browser, no runtime, no fonts installed and no network** —
+one executable and one markdown file. Nothing is encoded on this path: deflate is
+almost all of what the PNG and PDF commands spend, and none of it is here.
+
+SDL lives behind `contrib/window` and is reached only from `present.mere`, so
+`mslide` itself still builds and runs without it. That separation is not
+tidiness: only one of the two can be tested without a display.
+
+The keycodes are SDL's documented numbers and no gate checks them — a test would
+need a keyboard. Everything else about the presenter is checked below.
+
 ## The PDF compresses nothing twice
 
 A PNG's pixel data is a zlib stream over rows that have each been filtered, and
@@ -126,6 +148,17 @@ a second idea about what a PNG is.
 - **Compiled output equals interpreted output.** The drawing paths cannot run
   under the interpreter at all — encoding one small PNG takes it 45 minutes — so
   the build is part of the gate rather than an afterthought.
+- **The window gives back what was drawn.** The presenter shows a slide and
+  reads the pixels back off the window, and the two must be the same bytes. This
+  is evidence rather than a tautology because `contrib/window` poisons its pixel
+  block with magenta before asking SDL to fill it — a capture that quietly did
+  nothing comes back magenta, not correct. And because two blank images also
+  compare equal, the picture is required to have ink in it. Showing a blank
+  canvas while writing the real one fails **both** assertions, which is how they
+  were checked.
+
+  Compiled, and headless under SDL's dummy driver, so it runs in CI without
+  opening a window on your desktop.
 - **The PDF, through a reader that is not ours.** `pdftoppm` renders it back and
   the pages must have the same size, the same two colours **exactly**, and ink in
   the same places. Not the same pixels: poppler resamples an image however it is

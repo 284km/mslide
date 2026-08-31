@@ -77,6 +77,18 @@ let of_blocks = fn (bs: block list) ->
 
 let of_lines = fn (lines: str list) -> of_blocks (Md.parse lines);
 
+// The slide a presenter is on. Out of range clamps rather than failing: the
+// caller is a key press, and a key press at the end of a deck is not an error.
+let at = fn (d: deck) -> fn (i: int) ->
+  let rec go = fn (ss: slide list) -> fn (k: int) -> fn (last: slide) ->
+    match ss with
+    | Nil -> last
+    | Cons (s, rest) -> if k <= 0 then s else go rest (k - 1) s
+  in
+  match d.slides with
+  | Nil -> slide { title = "", blocks = Nil }
+  | Cons (first, _r) -> go d.slides i first;
+
 let count = fn (d: deck) ->
   let rec go = fn (ss: slide list) -> fn (n: int) ->
     match ss with

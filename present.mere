@@ -1,0 +1,163 @@
+// present.mere — the deck, in a window, with no browser on the machine.
+//
+// This is what the project is for. Everything before it produces a file for
+// something else to show; this shows it. The room needs no browser, no runtime,
+// no fonts installed and no network — one executable and one markdown file.
+//
+// SDL lives behind `contrib/window` and is only reached from here, so `mslide`
+// itself still builds and runs without it. mbrowse learned that separation the
+// same way: the thing that draws and the thing that opens a window are different
+// files, because only one of them can be tested without a display.
+//
+// Nothing is encoded. The PNG path spends nearly all its time in deflate and
+// none of that is here: a slide is laid out, drawn into a canvas and handed to
+// the window.
+
+import "window/window.mere";
+import "./png.mere";
+
+// SDL's own numbers. Arrows and page keys carry the scancode bit, which is why
+// they are large; space and the letters are their ASCII.
+let k_right = 1073741903;
+let k_left = 1073741904;
+let k_down = 1073741905;
+let k_up = 1073741906;
+let k_pgdn = 1073741902;
+let k_pgup = 1073741899;
+let k_home = 1073741898;
+let k_end = 1073741901;
+let k_space = 32;
+let k_return = 13;
+let k_backspace = 8;
+let k_escape = 27;
+let k_q = 113;
+
+module Present {
+
+// Forward, back, first, last, quit, or nothing — the whole interface.
+let step_for = fn (k: int) ->
+  if k == k_right || k == k_down || k == k_pgdn || k == k_space || k == k_return then 1
+  else if k == k_left || k == k_up || k == k_pgup || k == k_backspace then 0 - 1
+  else 0;
+
+let clamp = fn (i: int) -> fn (n: int) ->
+  if i < 0 then 0 else if i >= n then n - 1 else i;
+
+// The slide, plus what a presenter needs and an audience does not: which slide
+// this is, and how long they have been talking.
+let draw = fn (f: font) -> fn (fr: frame) -> fn (d: deck) -> fn (i: int) -> fn (secs: int) ->
+  let n = Deck.count d in
+  let s = Deck.at d i in
+  let c = Png.slide_canvas f fr s in
+  let grey = Canvas.rgba 152 160 173 255 in
+  let px = fr.h / 34 in
+  let asc = Font.line_height f px - Font.scale f (0 - f.descender) px in
+  let base = fr.h - fr.pad_y / 2 - Font.scale f (0 - f.descender) px in
+  let _ = Png.text_at c f (show (i + 1) ++ " / " ++ show n)
+            (fr.w - fr.pad_x) base px grey in
+  let mm = secs / 60 in
+  let ss = secs % 60 in
+  let clock = show mm ++ ":" ++ (if ss < 10 then "0" else "") ++ show ss in
+  let _ = Png.text_at c f clock (fr.pad_x / 2) base px grey in
+  c;
+
+let run = fn (fontpath: str) -> fn (src: str) ->
+  let f = Font.load fontpath in
+  let d = Deck.of_lines (read_lines src) in
+  let n = Deck.count d in
+  if n == 0 then
+    let _ = print "present: the deck has no slides" in 1
+  else
+  match Window.open_ 1280 720 "mslide" with
+  | None -> let _ = print "present: no window (no display, or SDL is absent)" in 1
+  | Some win ->
+    let fr = Layout.frame_of (Window.width win) (Window.height win) in
+    let bg = Canvas.rgba 255 255 255 255 in
+    let st = map_new () in
+    let _ = map_set st "i" 0 in
+    let _ = map_set st "shown" (0 - 1) in
+    // `time` is epoch seconds and a float; a talk is timed in whole seconds and
+    // a clock that only has to count up needs nothing better.
+    let t0 = time () in
+    let elapsed = fn () -> int_of_float (time () - t0) in
+    let _ = map_set st "clock" 0 in
+    let rec loop = fn () ->
+      let i = map_get st "i" in
+      let secs = elapsed () in
+      // Redraw when the slide changes, and once a second so the clock moves.
+      // Laying a slide out is cheap; doing it every frame regardless would still
+      // be wrong, because then nothing in the loop would say what a frame is for.
+      let _ = if i != map_get st "shown" || secs != map_get st "clock" then
+                let _ = map_set st "shown" i in
+                let _ = map_set st "clock" secs in
+                let _ = Window.show win (draw f fr d i secs) bg in ()
+              else () in
+      match Window.poll 100 with
+      | Quit -> 0
+      | KeyDown k ->
+        if k == k_escape || k == k_q then 0
+        else if k == k_home then (let _ = map_set st "i" 0 in loop ())
+        else if k == k_end then (let _ = map_set st "i" (n - 1) in loop ())
+        else
+          let _ = map_set st "i" (clamp (i + step_for k) n) in
+          loop ()
+      | _other -> loop () in
+    let code = loop () in
+    let _ = Window.close win in
+    code;
+
+// Show one slide, read it back off the window, and write both the canvas that
+// went in and the pixels that came out. Two files from one canvas, so a
+// difference between them is the window round trip and nothing else.
+//
+// The readback is evidence rather than a tautology because `Window.capture`
+// poisons its pixel block with magenta before asking SDL to fill it: a capture
+// that quietly did nothing would come back magenta, not come back correct.
+//
+// Small on purpose. The layout is a fraction of the frame, so a 320x180 window
+// draws the same slide, and encoding two of those costs seconds where two of
+// 1280x720 costs most of a minute.
+let capture = fn (fontpath: str) -> fn (src: str) -> fn (i: int) ->
+               fn (direct: str) -> fn (shown: str) ->
+  let f = Font.load fontpath in
+  let d = Deck.of_lines (read_lines src) in
+  match Window.open_ 320 180 "mslide capture" with
+  | None -> let _ = print "capture: no window (no display, or SDL is absent)" in 1
+  | Some win ->
+    let fr = Layout.frame_of (Window.width win) (Window.height win) in
+    // A fixed clock: the gate compares two files and neither may depend on when
+    // it ran.
+    let c = draw f fr d i 0 in
+    let _ = write_bytes direct (bytes_of_vec (Png.encode c)) in
+    let _ = Window.show win c (Canvas.rgba 255 255 255 255) in
+    match Window.capture win with
+    | None -> let _ = Window.close win in
+              let _ = print "capture: the window would not read back" in 1
+    | Some got ->
+      let _ = write_bytes shown (bytes_of_vec (Png.encode got)) in
+      let _ = Window.close win in
+      0;
+
+};   // end of `module Present`
+
+let usage = fn () ->
+  let _ = print "usage: mspresent <deck.md> [font.ttf]" in
+  let _ = print "       arrows / space / page keys move, home and end jump, q or esc quits" in
+  let _ = print "       mspresent --capture <deck.md> <n> <direct.png> <shown.png> [font.ttf]" in
+  exit 2;
+
+match args () with
+| Nil -> usage ()
+| Cons ("--capture", rest) ->
+  (match rest with
+   | Cons (src, Cons (idx, Cons (direct, Cons (shown, more)))) ->
+     let fp = match more with Cons (p, _) -> p | Nil -> "font/MPLUS1p-Regular.ttf" in
+     exit (Present.capture fp src (int_of_str idx) direct shown)
+   | _ -> usage ())
+| Cons (src, rest) ->
+  let fp = match rest with Cons (p, _) -> p | Nil -> "font/MPLUS1p-Regular.ttf" in
+  if file_exists src == false then
+    let _ = print ("present: no such file: " ++ src) in exit 1
+  else if file_exists fp == false then
+    let _ = print ("present: no font at " ++ fp) in exit 1
+  else exit (Present.run fp src)
