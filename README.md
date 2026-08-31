@@ -19,6 +19,7 @@ mere install                                  # vendor the package dependencies
 mere -c mslide.mere > m.c && clang -O2 m.c -o mslide
 ./mslide deck.md out.html                     # one page, no script
 ./mslide --png deck.md out/                   # one image per slide, no browser
+./mslide --pdf deck.md out.pdf                # what a conference asks for
 sh scripts/check.sh
 ```
 
@@ -26,7 +27,7 @@ sh scripts/check.sh
 |---|---|
 | deck IR + HTML page | done |
 | PNG per slide | done |
-| PDF | not started |
+| PDF | done |
 | presenter binary (a window, arrow keys, a clock) | not started |
 
 **Build it before you draw with it.** Encoding one small PNG takes the
@@ -91,6 +92,22 @@ reports 87 disagreeing pixels against the old rule and none against the new.
 Nothing in this repository could have found that by testing itself. It took
 drawing something.
 
+## The PDF compresses nothing twice
+
+A PNG's pixel data is a zlib stream over rows that have each been filtered, and
+that is exactly what PDF calls `/FlateDecode` with `/Predictor 15`. So the bytes
+go across unchanged — no inflate, no re-deflate, no second pass over a megabyte
+of pixels. Deflate was nearly all of the time the PNG path spent, and doing it
+once was the point. A two-slide deck is 13,419 bytes of PDF over 12,160 bytes of
+images: everything else is structure.
+
+The palette travels too. mpng picks the cheapest true claim about a slide's
+pixels, which for text on white is a palette, and PDF has `/Indexed` — so the
+table goes in the page rather than being expanded back into three bytes a pixel.
+
+Reading the PNGs back to find those bytes uses mpng's own chunk primitives, not
+a second idea about what a PNG is.
+
 ## What is checked
 
 `scripts/check.sh`, and the interesting one needs no oracle:
@@ -106,10 +123,23 @@ drawing something.
 - **No script, no inline handlers, no `javascript:`, no external stylesheet, no
   `url(`** — checked on generated output rather than asserted here.
 - **Every heading in every deck reaches its page.**
-- **Compiled output equals interpreted output.** The renderers still to come
-  cannot run under the interpreter at all — encoding one small PNG takes it 45
-  minutes — so the build is part of the gate from here rather than an
-  afterthought.
+- **Compiled output equals interpreted output.** The drawing paths cannot run
+  under the interpreter at all — encoding one small PNG takes it 45 minutes — so
+  the build is part of the gate rather than an afterthought.
+- **The PDF, through a reader that is not ours.** `pdftoppm` renders it back and
+  the pages must have the same size, the same two colours **exactly**, and ink in
+  the same places. Not the same pixels: poppler resamples an image however it is
+  placed, at 96dpi where one image pixel is one device pixel and at 192dpi too,
+  so a two-colour page comes back with hundreds of colours along every stroke.
+  That is the reader's business and not the file's, and a gate that demanded
+  equality would be a gate about poppler.
+
+  The thresholds were set by breaking the file rather than by taste. Declaring
+  `/Predictor 1` on rows that are filtered turns `(22, 24, 29)` into
+  `(222, 222, 223)` — caught outright by the colour check — and drops the mask
+  agreement to 98.7%, against 99.8% for a correct file. Three tenths of a point
+  is no separation, so the mask check is set at 95% and is there to catch ink
+  that has *moved*; the colours are what discriminate.
 
 Both invariants have been made to fail on purpose: a cut rule widened to `***`
 was caught as two decks with the wrong slide count, and a block dropped at each

@@ -69,6 +69,11 @@ if command -v clang >/dev/null 2>&1; then
     "$OUT/mslide" test/decks/basic.md "$OUT/compiled.html" >/dev/null
     cmp -s "$OUT/basic.html" "$OUT/compiled.html" || bad "compiled output differs from interpreted"
     note "ok    compiled == interpreted"
+
+    # 5. The deck through a PDF reader that is not ours. Slow — it renders every
+    #    slide twice and then poppler renders them back — so it runs last and
+    #    only when there is a compiled binary to run it with.
+    if MSLIDE="$OUT/mslide" sh scripts/pdf_check.sh; then :; else bad "pdf_check"; fi
   fi
 else
   note "skip  no clang, so compiled == interpreted was not checked"

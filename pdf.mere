@@ -1,0 +1,172 @@
+// pdf.mere — a deck as one PDF, without compressing anything twice.
+//
+// A conference asks for a PDF. The slides are already PNGs, and a PNG's pixel
+// data is a zlib stream over rows that have each been filtered — which is
+// exactly what PDF calls `/FlateDecode` with `/Predictor 15`. So the bytes move
+// across unchanged: no inflate, no re-deflate, no second pass over a megabyte of
+// pixels. Deflate was 80 seconds of the 80 this took, and doing it once is the
+// whole design.
+//
+// Reading the PNG back to find those bytes uses mpng's own chunk primitives
+// rather than a second idea about what a PNG is.
+
+import "github.com/284km/mpng/png.mere";
+
+module Pdf {
+
+// 960 x 540 points is 13.333 x 7.5 inches: the widescreen slide, and what every
+// other deck in the room will be.
+let page_w = 960;
+let page_h = 540;
+
+let push_s = fn (v) -> fn (s: str) ->
+  let b = bytes_of_str s in
+  let n = bytes_len b in
+  let rec go = fn (i: int) ->
+    if i >= n then () else (let _ = vec_push v (bytes_get b i) in go (i + 1)) in
+  go 0;
+
+let push_range = fn (v) -> fn (src) -> fn (from: int) -> fn (len: int) ->
+  let rec go = fn (i: int) ->
+    if i >= len then () else (let _ = vec_push v (vec_get src (from + i)) in go (i + 1)) in
+  go 0;
+
+// A cross-reference entry is exactly twenty bytes, and the offset field is ten
+// digits whether it needs them or not.
+let pad10 = fn (n: int) ->
+  let rec pad = fn (t: str) -> if str_len t >= 10 then t else pad ("0" ++ t) in
+  pad (show n);
+
+let hex_digit = fn (n: int) ->
+  if n < 10 then show n
+  else if n == 10 then "a" else if n == 11 then "b" else if n == 12 then "c"
+  else if n == 13 then "d" else if n == 14 then "e" else "f";
+
+let hex_of_range = fn (src) -> fn (from: int) -> fn (len: int) ->
+  let b = strbuf_new () in
+  let rec go = fn (i: int) ->
+    if i >= len then ()
+    else
+      let x = vec_get src (from + i) in
+      let _ = strbuf_push b (hex_digit (x / 16)) in
+      let _ = strbuf_push b (hex_digit (x % 16)) in
+      go (i + 1) in
+  let _ = go 0 in
+  strbuf_to_str b;
+
+// Every IDAT payload, end to end. An encoder may split them and this one does
+// not, but a reader that assumes one is a reader that breaks on somebody else's
+// file.
+let idat_of = fn (data) ->
+  let out = vec_new () in
+  let n = vec_len data in
+  let rec walk = fn (pos: int) ->
+    if pos + 8 > n then ()
+    else
+      let len = u32be data pos in
+      let _ = if is_idat data (pos + 4) then push_range out data (pos + 8) len else () in
+      walk (pos + 12 + len) in
+  let _ = walk 8 in
+  out;
+
+let plte_of = fn (data) ->
+  let out = vec_new () in
+  let n = vec_len data in
+  let rec walk = fn (pos: int) ->
+    if pos + 8 > n then ()
+    else
+      let len = u32be data pos in
+      if is_plte data (pos + 4) then push_range out data (pos + 8) len
+      else walk (pos + 12 + len) in
+  let _ = walk 8 in
+  out;
+
+// The colour space, said the way PDF says it. Palette is the interesting one:
+// the table travels in the page rather than being expanded back into pixels,
+// which is the whole reason the file stays small.
+let colour_space = fn (colour: int) -> fn (plte) ->
+  if colour == 3 then
+    "[/Indexed /DeviceRGB " ++ show (vec_len plte / 3 - 1)
+    ++ " <" ++ hex_of_range plte 0 (vec_len plte) ++ ">]"
+  else if colour == 0 then "/DeviceGray"
+  else "/DeviceRGB";
+
+let of_pngs = fn (pngs: bytes list) ->
+  let out = vec_new () in
+  let offsets = vec_new () in
+  let n = list_len pngs in
+  let obj = fn (num: int) ->
+    let _ = vec_push offsets (vec_len out) in
+    push_s out (show num ++ " 0 obj\n") in
+  let _ = push_s out "%PDF-1.4\n" in
+
+  let _ = obj 1 in
+  let _ = push_s out "<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" in
+
+  let _ = obj 2 in
+  let _ = push_s out "<< /Type /Pages /Count " in
+  let _ = push_s out (show n) in
+  let _ = push_s out " /Kids [" in
+  let rec kids = fn (i: int) ->
+    if i >= n then ()
+    else (let _ = push_s out (show (3 + 3 * i) ++ " 0 R ") in kids (i + 1)) in
+  let _ = kids 0 in
+  let _ = push_s out "] >>\nendobj\n" in
+
+  let state = map_new () in
+  let _ = map_set state "i" 0 in
+  let _ = list_iter pngs (fn (p: bytes) ->
+    let i = map_get state "i" in
+    let _ = map_set state "i" (i + 1) in
+    let data = vec_of_bytes p in
+    let hdr = read_header data in
+    let w = vec_get hdr 0 in
+    let h = vec_get hdr 1 in
+    let depth = vec_get hdr 2 in
+    let colour = vec_get hdr 3 in
+    let plte = plte_of data in
+    let idat = idat_of data in
+    let pg = 3 + 3 * i in
+
+    let _ = obj pg in
+    let _ = push_s out ("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
+                        ++ show page_w ++ " " ++ show page_h ++ "]\n"
+                        ++ "   /Resources << /XObject << /Im0 " ++ show (pg + 2) ++ " 0 R >> >>\n"
+                        ++ "   /Contents " ++ show (pg + 1) ++ " 0 R >>\nendobj\n") in
+
+    // The unit square, scaled to the page. Nothing else is drawn.
+    let content = "q " ++ show page_w ++ " 0 0 " ++ show page_h ++ " 0 0 cm /Im0 Do Q\n" in
+    let _ = obj (pg + 1) in
+    let _ = push_s out ("<< /Length " ++ show (str_len content) ++ " >>\nstream\n") in
+    let _ = push_s out content in
+    let _ = push_s out "endstream\nendobj\n" in
+
+    let _ = obj (pg + 2) in
+    let _ = push_s out ("<< /Type /XObject /Subtype /Image /Name /Im0\n"
+                        ++ "   /Width " ++ show w ++ " /Height " ++ show h ++ "\n"
+                        ++ "   /ColorSpace " ++ colour_space colour plte ++ "\n"
+                        ++ "   /BitsPerComponent " ++ show depth ++ "\n"
+                        ++ "   /Filter /FlateDecode\n"
+                        // Predictor 15 is PNG filtering: the encoder already chose
+                        // a filter per row and wrote the tag in front of it, and
+                        // this says so rather than undoing it.
+                        ++ "   /DecodeParms << /Predictor 15 /Colors " ++ show (channels colour)
+                        ++ " /BitsPerComponent " ++ show depth ++ " /Columns " ++ show w ++ " >>\n"
+                        ++ "   /Length " ++ show (vec_len idat) ++ " >>\nstream\n") in
+    let _ = push_range out idat 0 (vec_len idat) in
+    let _ = push_s out "\nendstream\nendobj\n" in
+    ()) in
+
+  let total = 2 + 3 * n in
+  let xref_at = vec_len out in
+  let _ = push_s out ("xref\n0 " ++ show (total + 1) ++ "\n") in
+  let _ = push_s out "0000000000 65535 f \n" in
+  let rec entries = fn (i: int) ->
+    if i >= total then ()
+    else (let _ = push_s out (pad10 (vec_get offsets i) ++ " 00000 n \n") in entries (i + 1)) in
+  let _ = entries 0 in
+  let _ = push_s out ("trailer\n<< /Size " ++ show (total + 1) ++ " /Root 1 0 R >>\n"
+                      ++ "startxref\n" ++ show xref_at ++ "\n%%EOF\n") in
+  bytes_of_vec out;
+
+};   // end of `module Pdf`

@@ -6,15 +6,33 @@
 // memory stick with the network off, and it prints one slide to a page.
 import "./html.mere";
 import "./png.mere";
+import "./pdf.mere";
 
 let usage = fn () ->
   let _ = print "usage: mslide <deck.md> [out.html]" in
   let _ = print "       mslide --png <deck.md> <out-dir> [font.ttf]" in
+  let _ = print "       mslide --pdf <deck.md> <out.pdf> [font.ttf]" in
   exit 2;
 
 // The bundled face, unless told otherwise. A deck that renders differently on
 // the machine it is shown from is not a deck, so the font travels with it.
 let default_font = "font/MPLUS1p-Regular.ttf";
+
+// Every slide, encoded once. Both commands below take the same list; the PDF
+// carries those bytes across without inflating them.
+let render_pngs = fn (src: str) -> fn (fontpath: str) ->
+  let f = Font.load fontpath in
+  let fr = Layout.frame_of 1280 720 in
+  let d = Deck.of_lines (read_lines src) in
+  (d, list_map d.slides (fn (s: slide) -> bytes_of_vec (Png.encode (Png.slide_canvas f fr s))));
+
+let pdf_cmd = fn (src: str) -> fn (out: str) -> fn (fontpath: str) ->
+  if file_exists fontpath == false then
+    let _ = print ("mslide: no font at " ++ fontpath) in exit 1
+  else
+    let (d, pngs) = render_pngs src fontpath in
+    let _ = write_bytes out (Pdf.of_pngs pngs) in
+    print (src ++ " -> " ++ out ++ " (" ++ show (Deck.count d) ++ " slides)");
 
 let png_cmd = fn (src: str) -> fn (dir: str) -> fn (fontpath: str) ->
   if file_exists fontpath == false then
@@ -37,6 +55,12 @@ let png_cmd = fn (src: str) -> fn (dir: str) -> fn (fontpath: str) ->
 
 match args () with
 | Nil -> usage ()
+| Cons ("--pdf", rest) ->
+  (match rest with
+   | Cons (src, Cons (out, more)) ->
+     let fp = match more with Cons (p, _) -> p | Nil -> default_font in
+     pdf_cmd src out fp
+   | _ -> usage ())
 | Cons ("--png", rest) ->
   (match rest with
    | Cons (src, Cons (dir, more)) ->
