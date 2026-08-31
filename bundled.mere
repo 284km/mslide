@@ -1,0 +1,51 @@
+// bundled.mere — where the files that ship with this package are.
+//
+// The font travels with the deck, which is the point of bundling it, and until
+// now the path to it was `font/MPLUS1p-Regular.ttf` — relative to whatever
+// directory the program happened to be started in. That works for exactly one
+// caller: this package, run from its own root. The first program to depend on
+// mslide from another repository got
+//
+//     read_file_bytes: cannot open font/MPLUS1p-Regular.ttf
+//
+// which is a true message about a path nobody wrote and nobody could have
+// guessed, because the font is under `.mere_modules/` where `mere install` put
+// it. Mere has no way for a module to ask where it is, so the candidates are
+// listed and the first one that exists wins — the same thing mbrowse does to
+// find a CA bundle.
+//
+// `MSLIDE_FONT` comes first so that a deck can be rendered in a face nobody here
+// chose.
+
+module Bundled {
+
+let font_name = "MPLUS1p-Regular.ttf";
+
+// In order: what the caller asked for, this package run from its own root, and
+// this package vendored into somebody else's.
+let font_candidates =
+  Cons ("font/" ++ font_name,
+  Cons (".mere_modules/github.com/284km/mslide/font/" ++ font_name,
+  Cons ("../.mere_modules/github.com/284km/mslide/font/" ++ font_name, Nil)));
+
+let rec first_that_exists = fn (l: str list) ->
+  match l with
+  | Nil -> ""
+  | Cons (p, rest) -> if file_exists p then p else first_that_exists rest;
+
+// The bundled face, or "" when it cannot be found. Empty rather than a failure:
+// the caller knows whether a missing font is fatal, and a renderer that cannot
+// draw should say so in its own words rather than in `read_file_bytes`'.
+let font = fn () ->
+  match env_var "MSLIDE_FONT" with
+  | Some p -> if file_exists p then p else first_that_exists font_candidates
+  | None -> first_that_exists font_candidates;
+
+// What to print when there is none. Naming the places that were looked at is
+// most of the fix: the original error named one path, and it was the one path
+// that was never going to be right.
+let font_missing = fn () ->
+  "no font found. Set MSLIDE_FONT, or put " ++ font_name ++ " in one of:\n"
+  ++ str_join "\n" (list_map font_candidates (fn (p: str) -> "  " ++ p));
+
+};   // end of `module Bundled`

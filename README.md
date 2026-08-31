@@ -97,6 +97,30 @@ reports 87 disagreeing pixels against the old rule and none against the new.
 Nothing in this repository could have found that by testing itself. It took
 drawing something.
 
+## Using it from another repository
+
+The modules are the library and `mslide.mere` is only the default driver, so a
+repository of decks can pin a revision and write its own:
+
+    [dependencies]
+    mslide = { git = "https://github.com/284km/mslide", rev = "..." }
+
+| import | gives you |
+|---|---|
+| `.../mslide/deck.mere` | `Deck.of_lines`, `Deck.at`, `Deck.count`, `slide`, `deck` |
+| `.../mslide/html.mere` | `DeckHtml.render`, and `MarkdownHtml` under it |
+| `.../mslide/png.mere` | `Png.slide_canvas`, `Png.encode`, `Layout`, `Font`, `Canvas` |
+| `.../mslide/pdf.mere` | `Pdf.of_pngs` |
+| `.../mslide/bundled.mere` | `Bundled.font ()` — where the shipped face went |
+
+`Bundled.font ()` exists because the first program to depend on this package from
+somewhere else got `read_file_bytes: cannot open font/MPLUS1p-Regular.ttf` — a
+true message about a path nobody had written, since `mere install` puts the font
+under `.mere_modules/`. Mere has no way for a module to ask where it is, so the
+candidates are listed and the first that exists wins, `MSLIDE_FONT` first.
+
+Nothing but using it from outside could have found that.
+
 ## The presenter is the point
 
 `./mspresent deck.md` opens a window and shows the deck. Arrows, space and the
