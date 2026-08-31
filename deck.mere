@@ -14,7 +14,7 @@
 import "github.com/284km/mere-markdown/parse.mere";
 
 type slide = { title: str, blocks: block list };
-type deck = { title: str, slides: slide list };
+type deck = { title: str, slides: slide list, meta: (str * str) list };
 
 module Deck {
 
@@ -51,6 +51,94 @@ let rec trim_blanks = fn (bs: block list) ->
 let strip = fn (bs: block list) ->
   list_rev (trim_blanks (list_rev (trim_blanks bs)));
 
+// Front matter, which is not markdown and never was: it is what a static site
+// generator puts at the top of a file, and it is fenced with `---` — the same
+// three characters that cut a slide here. Feeding a real published article in
+// produced a first slide made of YAML and a second holding the entire document,
+// with no title, because the two delimiters read as two cuts.
+//
+// Only when the very first line is exactly `---` and a closing `---` follows.
+// Without the closing one this is not front matter but a document that opens
+// with a rule, and swallowing it would lose the deck.
+let front_matter_end = fn (lines: str list) ->
+  match lines with
+  | Nil -> 0
+  | Cons (first, rest) ->
+    if str_trim first != "---" then 0
+    else
+      let rec go = fn (ls: str list) -> fn (i: int) ->
+        match ls with
+        | Nil -> 0                      // never closed: not front matter
+        | Cons (l, more) -> if str_trim l == "---" then i + 1 else go more (i + 1)
+      in go rest 1;
+
+// `key: value` at the left margin, with the quotes taken off. Indented lines
+// belong to a nested value and are skipped rather than guessed at — this is not
+// a YAML parser and should not look like one.
+let parse_meta = fn (lines: str list) ->
+  let unquote = fn (v: str) ->
+    let n = str_len v in
+    if n >= 2 && ((char_at v 0 == "\"" && char_at v (n - 1) == "\"")
+                  || (char_at v 0 == "'" && char_at v (n - 1) == "'"))
+    then substring v 1 (n - 1) else v in
+  let rec go = fn (ls: str list) -> fn (acc: (str * str) list) ->
+    match ls with
+    | Nil -> list_rev acc
+    | Cons (l, rest) ->
+      let n = str_len l in
+      if n == 0 then go rest acc
+      else if char_at l 0 == " " then go rest acc          // nested: not ours
+      else
+        let i = str_index_of l ": " in
+        if i <= 0 then go rest acc
+        else go rest (Cons ((substring l 0 i, unquote (str_trim (substring l (i + 2) n))), acc))
+  in go lines Nil;
+
+// `skip`, not `drop`: `drop` is a keyword, and using it fails with
+// "expected pattern" pointing at the `let` — a message with nothing in it about
+// the name being the problem.
+let rec skip = fn (n: int) -> fn (ls: str list) ->
+  if n <= 0 then ls
+  else
+    match ls with
+    | Nil -> Nil
+    | Cons (_h, t) -> skip (n - 1) t;
+
+let rec take = fn (n: int) -> fn (ls: str list) ->
+  if n <= 0 then Nil
+  else
+    match ls with
+    | Nil -> Nil
+    | Cons (h, t) -> Cons (h, take (n - 1) t);
+
+let rec lookup = fn (k: str) -> fn (m: (str * str) list) ->
+  match m with
+  | Nil -> ""
+  | Cons (kv, rest) -> let (a, b) = kv in if a == k then b else lookup k rest;
+
+// Cutting at a heading, for documents that have none of our cuts in them.
+//
+// Feeding a published article in was the first honest test of this tool, and it
+// produced one slide: an essay has headings and no thematic breaks, because an
+// essay is not a deck. Rather than write the breaks in — which is writing, and
+// would make the input agree with the tool instead of testing it — the tool can
+// be told that a heading of a given level starts a slide.
+//
+// `level = 0` means do not; that is the default and what `---` alone gives.
+let cut_at_heading = fn (level: int) -> fn (bs: block list) ->
+  let rec go = fn (rest: block list) -> fn (acc: block list) ->
+    match rest with
+    | Nil -> list_rev acc
+    | Cons (b, more) ->
+      match b with
+      | Heading (l, _t) ->
+        // The rule goes BEFORE the heading, so the heading opens its slide.
+        if l == level then go more (Cons (b, Cons (Hr "---", acc)))
+        else go more (Cons (b, acc))
+      | _ -> go more (Cons (b, acc))
+  in
+  if level <= 0 then bs else go bs Nil;
+
 let of_blocks = fn (bs: block list) ->
   // Slides are built in reverse and turned around once, and so is each slide's
   // block list. An empty slide is dropped rather than rendered: a deck that ends
@@ -73,9 +161,21 @@ let of_blocks = fn (bs: block list) ->
   let dt = match ss with
     | Nil -> ""
     | Cons (s, _rest) -> s.title in
-  deck { title = dt, slides = ss };
+  deck { title = dt, slides = ss, meta = Nil };
 
-let of_lines = fn (lines: str list) -> of_blocks (Md.parse lines);
+// Front matter's `title:` wins over the first heading, which wins over nothing.
+// The same order the docs site uses, and for the same reason: the author said it
+// explicitly in one of those places and inferred it in the other.
+let of_lines_split = fn (level: int) -> fn (lines: str list) ->
+  let cut = front_matter_end lines in
+  let meta = if cut == 0 then Nil else parse_meta (take (cut - 1) (skip 1 lines)) in
+  let body = skip cut lines in
+  let d = of_blocks (cut_at_heading level (Md.parse body)) in
+  let t = lookup "title" meta in
+  deck { title = if str_len t > 0 then t else d.title,
+         slides = d.slides, meta = meta };
+
+let of_lines = fn (lines: str list) -> of_lines_split 0 lines;
 
 // The slide a presenter is on. Out of range clamps rather than failing: the
 // caller is a key press, and a key press at the end of a deck is not an error.

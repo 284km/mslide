@@ -53,6 +53,23 @@ wrapper that splits on `" "` puts a whole paragraph on one line and runs it off
 the slide. `font/MPLUS1p-Regular.ttf` ships with the deck, under the OFL, because
 a deck that renders differently on the machine it is shown from is not a deck.
 
+## Front matter, and documents that have no cuts in them
+
+Feeding a published article in was the first honest test of this tool, and it
+failed twice.
+
+It starts with YAML fenced by `---`, which is what a static site generator puts
+there and what cuts a slide here, so the first slide was metadata and the second
+held the whole document with no title. Front matter is now skipped when the very
+first line is `---` and a closing `---` follows — without the closing one it is
+not front matter but a document opening with a rule, and swallowing it would lose
+the deck. A `title:` in it wins over the first heading.
+
+Then it produced one slide, because an essay has headings and no thematic breaks.
+An essay is not a deck. Writing the breaks in would make the input agree with the
+tool instead of testing it, so `Deck.of_lines_split 2` cuts at every H2 instead.
+The default is 0 — cut nowhere but at `---`.
+
 ## `---` cuts, `***` does not
 
 A thematic break is one block whichever way it is written, and to a browser
