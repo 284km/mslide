@@ -4,3 +4,5 @@
 *.wasm
 mslide
 _out/
+__pycache__/
+*.pyc
