@@ -15,17 +15,37 @@ Slides come off a document, and the document is
 parser here and there will not be one.
 
 ```sh
-mere install                        # vendor the package dependencies
-mere mslide.mere deck.md out.html   # or: mere -c mslide.mere > m.c && clang -O2 m.c -o mslide
+mere install                                  # vendor the package dependencies
+mere -c mslide.mere > m.c && clang -O2 m.c -o mslide
+./mslide deck.md out.html                     # one page, no script
+./mslide --png deck.md out/                   # one image per slide, no browser
 sh scripts/check.sh
 ```
 
 | | |
 |---|---|
 | deck IR + HTML page | done |
-| PNG per slide | not started |
+| PNG per slide | done |
 | PDF | not started |
 | presenter binary (a window, arrow keys, a clock) | not started |
+
+**Build it before you draw with it.** Encoding one small PNG takes the
+interpreter forty-five minutes and the compiled program no time worth measuring,
+so `--png` is not a thing to try under `mere` directly. The gate compiles.
+
+## Drawing needs no browser, and nothing here was written for slides
+
+| | |
+|---|---|
+| `contrib/font` | a TrueType file, as widths and outlines |
+| `contrib/raster` | somewhere to put them |
+| `contrib/unicode` | where a line may be broken (UAX #14) |
+| `mpng` + `mgz` | the file on disk |
+
+The line breaker earns its place immediately: Japanese has no spaces, so a
+wrapper that splits on `" "` puts a whole paragraph on one line and runs it off
+the slide. `font/MPLUS1p-Regular.ttf` ships with the deck, under the OFL, because
+a deck that renders differently on the machine it is shown from is not a deck.
 
 ## `---` cuts, `***` does not
 
@@ -52,6 +72,24 @@ a script engine** can show — which is the browser this project's sibling
 renderer can eventually be pointed at the same file and asked whether they agree.
 Everything is inline, so it opens from a memory stick with the network off, and
 `@media print` puts one slide on one page.
+
+## The fix that came out of drawing something
+
+Rendering a deck put a bar across the top of every letter with an ascender.
+Two of the three causes were mine — the colour word was unpacked by hand and
+took green, blue and alpha for red, green and blue, so the first deck came out
+blue; and the glyph's sampling box reached above its own ascent.
+
+The third was not. `Font.text_raster f "d" 30 40 8`, one letter and one call into
+`contrib/font`, drew a bar the letter does not have. The point-in-glyph test was
+half-open in the curve parameter rather than in y, so a vertex that is a y
+extremum left an uncancelled crossing, and with the ray running rightward that
+put everything to its left inside the glyph. Fixed upstream in Mere v0.1.365,
+with an oracle-free gate — inside is inside whichever way the ray goes — that
+reports 87 disagreeing pixels against the old rule and none against the new.
+
+Nothing in this repository could have found that by testing itself. It took
+drawing something.
 
 ## What is checked
 

@@ -1,0 +1,133 @@
+// layout.mere — where the ink goes on a slide.
+//
+// Not a browser's layout. There are no boxes, no cascade and no floats; a slide
+// is a column of lines, centred. That is the whole difference between this and
+// the two thousand lines mbrowse needs, and it is why none of that was borrowed.
+//
+// What is borrowed is the hard part nobody should write twice: `contrib/font`
+// measures a string, and `contrib/unicode` says where a line may be broken. The
+// second one matters more than it looks — Japanese has no spaces, so a wrapper
+// that splits on " " puts a whole paragraph on one line and runs it off the
+// slide.
+
+import "font/font.mere";
+import "unicode/linebreak.mere";
+import "github.com/284km/mere-markdown/parse.mere";
+import "./deck.mere";
+
+// One run of text on the slide, at a baseline, or a rule across it.
+type draw =
+  | Ink of (str * int * int * int)     // text, x, baseline y, px size
+  | Bar of (int * int * int);          // x, y, width
+
+// The canvas, and where a slide's content is allowed to be.
+type frame = { w: int, h: int, pad_x: int, pad_y: int };
+
+module Layout {
+
+let frame_of = fn (w: int) -> fn (h: int) ->
+  frame { w = w, h = h, pad_x = w / 13, pad_y = h / 12 };
+
+// Inline markup, as the text a reader sees. The scan already knows where the
+// markers are, so this is a fold rather than another pass over the characters —
+// and `[text](url)` becomes the text, not the URL, which a character-stripping
+// version could not do.
+let plain = fn (s: str) ->
+  str_join "" (list_map (Md.spans s) (fn (sp: span) ->
+    match sp with
+    | Run t -> t
+    | Strong t -> t
+    | Emph t -> t
+    | Strike t -> t
+    | Mono t -> t
+    | Href (t, _u) -> t
+    | Pic (a, _u) -> a));
+
+// Greedy wrap. `split_lines` hands back the pieces a line may end after, so the
+// only question left is width, which is the one `Font.text_width` answers.
+let wrap = fn (f: font) -> fn (px: int) -> fn (maxw: int) -> fn (text: str) ->
+  let pieces = LineBreak.split_lines text in
+  let rec go = fn (ps: str list) -> fn (cur: str) -> fn (acc: str list) ->
+    match ps with
+    | Nil -> if str_len cur == 0 then list_rev acc else list_rev (Cons (cur, acc))
+    | Cons (p, rest) ->
+      let cand = cur ++ p in
+      if str_len cur > 0 && Font.text_width f (str_trim cand) px > maxw then
+        go rest p (Cons (cur, acc))
+      else go rest cand acc
+  in
+  let ls = go pieces "" Nil in
+  match ls with
+  | Nil -> Cons ("", Nil)
+  | Cons (_h, _t) -> ls;
+
+let heading_px = fn (base: int) -> fn (lvl: int) ->
+  if lvl <= 1 then (base * 21) / 10
+  else if lvl == 2 then (base * 16) / 10
+  else if lvl == 3 then (base * 12) / 10
+  else base;
+
+// Every line the slide will draw, in order, with the size it is drawn at and how
+// far it is indented. Height comes later, from the font, so that a change of
+// font moves the text rather than breaking the arithmetic.
+let lines_of = fn (f: font) -> fn (fr: frame) -> fn (s: slide) ->
+  let base = fr.h / 24 in
+  let full = fr.w - 2 * fr.pad_x in
+  let acc = vec_new () in
+  let emit = fn (t: str) -> fn (px: int) -> fn (ind: int) ->
+    vec_push acc (t, px, ind) in
+  let wrap_into = fn (t: str) -> fn (px: int) -> fn (ind: int) ->
+    list_iter (wrap f px (full - ind) (plain t)) (fn l -> emit (str_trim l) px ind) in
+  let _ = list_iter s.blocks (fn (b: block) ->
+    match b with
+    | Heading (lvl, t) -> wrap_into t (heading_px base lvl) 0
+    | Para ls -> wrap_into (str_join " " ls) base 0
+    | Quote ts -> wrap_into (str_join " " ts) ((base * 9) / 10) (base / 2)
+    | Bullets items -> list_iter items (fn (it: item) ->
+        wrap_into ("・" ++ it.text) base ((it.depth - 1) * base))
+    // Code is not wrapped. A wrapped program is a different program to read, so
+    // a line too long for the slide is the deck's problem to fix, not this one's
+    // to hide.
+    | Fence (_lang, body, _closed) ->
+      list_iter body (fn l -> emit l ((base * 7) / 10) (base / 2))
+    | Table rows -> list_iter rows (fn r -> emit (plain r) ((base * 8) / 10) 0)
+    | Hr _src -> emit "" 0 (0 - 1)     // -1 marks the rule; it has no text
+    | Blank -> ()) in
+  acc;
+
+let of_slide = fn (f: font) -> fn (fr: frame) -> fn (s: slide) ->
+  let ls = lines_of f fr s in
+  let n = vec_len ls in
+  // Total height first, so the column can be centred rather than started at a
+  // guessed offset.
+  let gap = fr.h / 90 in
+  let rec measure = fn (i: int) -> fn (acc: int) ->
+    if i >= n then acc
+    else
+      let (_t, px, ind) = vec_get ls i in
+      let hh = if ind < 0 then fr.h / 30 else Font.line_height f px + gap in
+      measure (i + 1) (acc + hh) in
+  let total = measure 0 0 in
+  let top = if total >= fr.h - 2 * fr.pad_y then fr.pad_y else (fr.h - total) / 2 in
+  let out = vec_new () in
+  let rec place = fn (i: int) -> fn (y: int) ->
+    if i >= n then ()
+    else
+      let (t, px, ind) = vec_get ls i in
+      if ind < 0 then
+        let _ = vec_push out (Bar (fr.pad_x, y + fr.h / 60, fr.w - 2 * fr.pad_x)) in
+        place (i + 1) (y + fr.h / 30)
+      else
+        let lh = Font.line_height f px in
+        // The baseline sits one ascent below the line's top, and the ascent is
+        // the same number the line height was built from, so the two cannot
+        // drift apart.
+        let asc = lh - Font.scale f (0 - f.descender) px in
+        let _ = if str_len t > 0 then
+                  vec_push out (Ink (t, fr.pad_x + ind, y + asc, px))
+                else () in
+        place (i + 1) (y + lh + gap) in
+  let _ = place 0 top in
+  out;
+
+};   // end of `module Layout`

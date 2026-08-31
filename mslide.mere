@@ -5,13 +5,44 @@
 // One file out, everything inline, no script and no fetches: it opens from a
 // memory stick with the network off, and it prints one slide to a page.
 import "./html.mere";
+import "./png.mere";
 
 let usage = fn () ->
   let _ = print "usage: mslide <deck.md> [out.html]" in
+  let _ = print "       mslide --png <deck.md> <out-dir> [font.ttf]" in
   exit 2;
+
+// The bundled face, unless told otherwise. A deck that renders differently on
+// the machine it is shown from is not a deck, so the font travels with it.
+let default_font = "font/MPLUS1p-Regular.ttf";
+
+let png_cmd = fn (src: str) -> fn (dir: str) -> fn (fontpath: str) ->
+  if file_exists fontpath == false then
+    let _ = print ("mslide: no font at " ++ fontpath) in exit 1
+  else
+    let f = Font.load fontpath in
+    let fr = Layout.frame_of 1280 720 in
+    let d = Deck.of_lines (read_lines src) in
+    let _ = mkdir_p dir in
+    let state = map_new () in
+    let _ = map_set state "n" 0 in
+    let _ = list_iter d.slides (fn (s: slide) ->
+      let n = map_get state "n" + 1 in
+      let _ = map_set state "n" n in
+      let out = dir ++ "/" ++ (if n < 10 then "0" else "") ++ show n ++ ".png" in
+      let c = Png.slide_canvas f fr s in
+      let _ = write_bytes out (bytes_of_vec (Png.encode c)) in
+      print ("  " ++ out)) in
+    print (src ++ " -> " ++ dir ++ " (" ++ show (Deck.count d) ++ " slides)");
 
 match args () with
 | Nil -> usage ()
+| Cons ("--png", rest) ->
+  (match rest with
+   | Cons (src, Cons (dir, more)) ->
+     let fp = match more with Cons (p, _) -> p | Nil -> default_font in
+     png_cmd src dir fp
+   | _ -> usage ())
 | Cons (src, rest) ->
   let out = match rest with Cons (o, _) -> o | Nil -> "slides.html" in
   if file_exists src == false then

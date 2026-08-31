@@ -1,0 +1,106 @@
+// png.mere — a slide, as pixels.
+//
+// This is the path that does not go through a browser, and the reason the
+// project exists. `contrib/font` gives the outline of a glyph, `contrib/raster`
+// gives somewhere to put it, and `mpng` writes the file. Nothing here opens a
+// window; a picture is checked by comparing it with another picture, and that
+// needs no display.
+//
+// A note on speed, because it is not a detail: encoding one 760x80 image took
+// the interpreter forty-five minutes and the compiled program no time at all.
+// This file is meant to be run after `mere -c | clang`, and the gate builds it.
+
+import "raster/path.mere";
+import "github.com/284km/mpng/encode.mere";
+import "./layout.mere";
+
+module Png {
+
+// One glyph, drawn where layout put it. Only the pixels inside the glyph's own
+// advance are asked about, so the cost is the ink and not the slide.
+let glyph_at = fn (c: canvas) -> fn (f: font) -> fn (gid: int) ->
+                fn (penx: int) -> fn (base: int) -> fn (px: int) -> fn (col: int) ->
+  let qs = Font.glyph_quads f gid in
+  match qs with
+  | Nil -> ()
+  | Cons (_q, _r) ->
+    let upem = float_of_int f.upem in
+    let sz = float_of_int px in
+    let adv = Font.scale f (Font.advance f gid) px in
+    // The glyph's own box, and only it. Sampling above the ascent asks the
+    // winding test about points no contour encloses, and it answers - the first
+    // render put a bar over every letter with an ascender.
+    let desc = Font.scale f (0 - f.descender) px in
+    let asc = Font.line_height f px - desc in
+    let x0 = if penx < 0 then 0 else penx in
+    let x1 = if penx + adv > c.w then c.w else penx + adv in
+    let y0 = if base - asc < 0 then 0 else base - asc in
+    let y1 = if base + desc > c.h then c.h else base + desc in
+    let rec row = fn (y: int) ->
+      if y >= y1 then ()
+      else
+        // The page's y grows down and the font's grows up from the baseline;
+        // this subtraction is where the two coordinate systems meet.
+        let gy = (float_of_int base - (float_of_int y + 0.5)) * upem / sz in
+        let rec col_ = fn (x: int) ->
+          if x >= x1 then ()
+          else
+            let gx = (float_of_int x + 0.5 - float_of_int penx) * upem / sz in
+            let _ = if Font.quads_cover qs gx gy then
+                      let _ = Canvas.set c x y col in () else () in
+            col_ (x + 1) in
+        let _ = col_ x0 in row (y + 1) in
+    row y0;
+
+let text_at = fn (c: canvas) -> fn (f: font) -> fn (t: str) ->
+              fn (x: int) -> fn (base: int) -> fn (px: int) -> fn (col: int) ->
+  let rec go = fn (cs: str list) -> fn (penx: int) ->
+    match cs with
+    | Nil -> ()
+    | Cons (ch, rest) ->
+      let gid = Font.glyph f (Font.codepoint ch) in
+      let _ = glyph_at c f gid penx base px col in
+      go rest (penx + Font.scale f (Font.advance f gid) px) in
+  go (utf8_chars t) x;
+
+let slide_canvas = fn (f: font) -> fn (fr: frame) -> fn (s: slide) ->
+  let c = Canvas.new_ fr.w fr.h in
+  let white = Canvas.rgba 255 255 255 255 in
+  let ink = Canvas.rgba 22 24 29 255 in
+  let rule = Canvas.rgba 215 219 226 255 in
+  let _ = Canvas.clear c white in
+  let ds = Layout.of_slide f fr s in
+  let n = vec_len ds in
+  let rec go = fn (i: int) ->
+    if i >= n then ()
+    else
+      let _ = match vec_get ds i with
+        | Ink (t, x, base, px) -> text_at c f t x base px ink
+        | Bar (x, y, w) ->
+          let _ = Canvas.fill_rect c (Canvas.full_clip c) x y w 2 rule in () in
+      go (i + 1) in
+  let _ = go 0 in
+  c;
+
+// A canvas as PNG bytes. `Canvas.get` hands back a packed colour; the encoder
+// wants the three samples, so this is where they are unpacked - once, here,
+// rather than inside the loop that draws.
+let encode = fn (c: canvas) ->
+  let px = vec_new () in
+  let n = c.w * c.h in
+  let rec go = fn (i: int) ->
+    if i >= n then ()
+    else
+      // Unpacked by the module that packed it. The first version shifted the
+      // word by hand, took green, blue and alpha for red, green and blue, and
+      // drew the whole deck in blue - a colour nobody had asked for and no
+      // channel had been given.
+      let v = Canvas.get c (i - (i / c.w) * c.w) (i / c.w) in
+      let _ = vec_push px (Canvas.red_of v) in
+      let _ = vec_push px (Canvas.green_of v) in
+      let _ = vec_push px (Canvas.blue_of v) in
+      go (i + 1) in
+  let _ = go 0 in
+  encode_rgb8 px c.w c.h;
+
+};   // end of `module Png`

@@ -11,3 +11,4 @@ leading_cut.md   1
 other_rules.md   1
 single.md        1
 trailing_cut.md  1
+japanese.md      2
