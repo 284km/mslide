@@ -4,7 +4,7 @@ path = "github.com/284km/mslide"
 version = "0.1.0"
 
 [dependencies]
-markdown = { git = "https://github.com/284km/mere-markdown", rev = "bbc514d9068e244e8e2dfc59cad8cccd1cfaca7c" }
+markdown = { git = "https://github.com/284km/mere-markdown", rev = "06288f9f641b83cab979f8864237378f1684c740" }
 font = { git = "https://github.com/merelang/mere", subdir = "contrib/font", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }
 raster = { git = "https://github.com/merelang/mere", subdir = "contrib/raster", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }
 unicode = { git = "https://github.com/merelang/mere", subdir = "contrib/unicode", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }

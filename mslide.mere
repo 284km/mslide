@@ -23,10 +23,23 @@ let default_font = fn () -> Bundled.font ();
 
 // Every slide, encoded once. Both commands below take the same list; the PDF
 // carries those bytes across without inflating them.
+let warn_overflow = fn (f: font) -> fn (fr: frame) -> fn (d: deck) ->
+  let st = map_new () in
+  let _ = map_set st "n" 0 in
+  list_iter d.slides (fn (s: slide) ->
+    let n = map_get st "n" + 1 in
+    let _ = map_set st "n" n in
+    let over = Layout.overflow_of f fr s in
+    if over > 0 then
+      print ("  warning: slide " ++ show n ++ " runs " ++ show over
+             ++ "px past the page" ++ (if str_len s.title > 0 then " (" ++ s.title ++ ")" else ""))
+    else ());
+
 let render_pngs = fn (src: str) -> fn (fontpath: str) ->
   let f = Font.load fontpath in
   let fr = Layout.frame_of 1280 720 in
   let d = Deck.of_lines (read_lines src) in
+  let _ = warn_overflow f fr d in
   (d, list_map d.slides (fn (s: slide) -> bytes_of_vec (Png.encode (Png.slide_canvas f fr s))));
 
 let pdf_cmd = fn (src: str) -> fn (out: str) -> fn (fontpath: str) ->

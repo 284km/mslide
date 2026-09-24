@@ -1,0 +1,71 @@
+name: CI
+
+# WHY THIS EXISTS. The gates in this repository were run by hand. A gate that
+# only runs when somebody remembers is a gate whose last green result may be
+# months old and about a compiler that no longer exists -- and merelang/mere's
+# own downstream check only asks whether this code still COMPILES, which is a
+# different question from whether it still answers what its oracle answers.
+#
+# scripts/check.sh renders decks and reads the pixels back: "the window gave
+# back exactly what was drawn". That is an end-to-end answer about a raster,
+# and the kind of thing that stops being true silently when a font, a layout
+# rule or the window backend moves under it.
+
+on:
+  push:
+  pull_request:
+  # The compiler moves daily and this repository does not, so a weekly run
+  # catches the case where nothing here changed and it broke anyway.
+  schedule:
+    - cron: "0 3 * * 1"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Built from main: this repository is developed against the compiler as
+      # it is, not against the last release.
+      - name: Check out the Mere compiler
+        uses: actions/checkout@v5
+        with:
+          repository: merelang/mere
+          path: .mere-compiler
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.1"
+
+      - name: Build mere
+        run: |
+          cd .mere-compiler
+          opam install . --deps-only
+          opam exec -- dune build bin/mere.exe
+
+      # The two oracles. Both sub-gates SKIP when their tool is absent, which
+      # is right on a laptop and wrong here: a build whose only output is red
+      # or green would report a pass for the half that did not run.
+      - name: SDL2 and poppler (the oracles)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev poppler-utils
+          sdl2-config --version
+          pdftoppm -v
+
+      # ⚠ ASSERTED, NOT ASSUMED. If the install above starts failing -- a
+      # package rename is enough -- present_check and pdf_check would skip and
+      # check.sh would still say ok. This is the line that goes red instead.
+      - name: the gates that can skip must not be able to, here
+        run: |
+          for t in sdl2-config pdftoppm python3; do
+            command -v "$t" >/dev/null 2>&1 || {
+              echo "$t is absent, so a gate below would skip and this job would stay green"
+              exit 1; }
+          done
+
+      - name: check (decks render, and the pixels read back)
+        run: MERE="$GITHUB_WORKSPACE/.mere-compiler/_build/default/bin/mere.exe" CC=clang sh scripts/check.sh

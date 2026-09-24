@@ -10,8 +10,8 @@ hash = "md5:fe0e9cc9f559dbca39b9ccd7794ab450"
 [[package]]
 name = "github.com/284km/mere-markdown"
 git = "https://github.com/284km/mere-markdown"
-rev = "bbc514d9068e244e8e2dfc59cad8cccd1cfaca7c"
-hash = "md5:a6a6ddab27bed87ce911f573dea09c11"
+rev = "06288f9f641b83cab979f8864237378f1684c740"
+hash = "md5:e25d0fe97fef5e853733a8b98c38a79e"
 
 [[package]]
 name = "github.com/284km/mpng"

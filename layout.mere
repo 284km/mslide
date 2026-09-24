@@ -20,6 +20,15 @@ type draw =
   | Ink of (str * int * int * int)     // text, x, baseline y, px size
   | Bar of (int * int * int);          // x, y, width
 
+// A piece the slide will draw: its text, the size it is set in, how far it is
+// indented, and whether the line ends after it. An indent of -1 means a rule and
+// has no text.
+//
+// `brk` is what lets a table exist. Everything else puts one piece on one line;
+// a table row puts one piece per column on the same line, and only the last of
+// them ends it.
+type lay = { text: str, px: int, ind: int, brk: bool };
+
 // The canvas, and where a slide's content is allowed to be.
 type frame = { w: int, h: int, pad_x: int, pad_y: int };
 
@@ -75,7 +84,13 @@ let lines_of = fn (f: font) -> fn (fr: frame) -> fn (s: slide) ->
   let full = fr.w - 2 * fr.pad_x in
   let acc = vec_new () in
   let emit = fn (t: str) -> fn (px: int) -> fn (ind: int) ->
-    vec_push acc (t, px, ind) in
+    vec_push acc (lay { text = t, px = px, ind = ind, brk = true }) in
+  // The cell at column `c`, or empty: a row may be short and a short row is not
+  // an error, it is a table.
+  let rec cell_at = fn (row: str list) -> fn (c: int) ->
+    match row with
+    | Nil -> ""
+    | Cons (h, t) -> if c <= 0 then h else cell_at t (c - 1) in
   let wrap_into = fn (t: str) -> fn (px: int) -> fn (ind: int) ->
     list_iter (wrap f px (full - ind) (plain t)) (fn l -> emit (str_trim l) px ind) in
   let _ = list_iter s.blocks (fn (b: block) ->
@@ -90,43 +105,98 @@ let lines_of = fn (f: font) -> fn (fr: frame) -> fn (s: slide) ->
     // to hide.
     | Fence (_lang, body, _closed) ->
       list_iter body (fn l -> emit l ((base * 7) / 10) (base / 2))
-    | Table rows -> list_iter rows (fn r -> emit (plain r) ((base * 8) / 10) 0)
+    // A table is drawn as a table, not printed as the markdown it was written in.
+    // Column widths come from the widest cell, measured in the font it will be
+    // set in, and the separator row is markup and goes.
+    | Table rows ->
+      let px = (base * 8) / 10 in
+      // The separator row is markup: it says how to align, which this does not
+      // do yet, and it is not a row of the table.
+      let body = list_filter rows (fn (r: str) -> Md.is_table_sep r == false) in
+      let cells = list_map body (fn (r: str) -> list_map (Md.cells_of r) plain) in
+      let ncol = let rec wid = fn (rs: (str list) list) -> fn (m: int) ->
+                   match rs with
+                   | Nil -> m
+                   | Cons (r, rest) -> let k = list_len r in wid rest (if k > m then k else m)
+                 in wid cells 0 in
+      let gap = Font.text_width f "  " px in
+      // A column is as wide as its widest cell, measured in the face it will be
+      // set in — which is why this happens here and not in the parser.
+      let col_w = fn (c: int) ->
+        let rec go = fn (rs: (str list) list) -> fn (m: int) ->
+          match rs with
+          | Nil -> m
+          | Cons (r, rest) ->
+            let w = Font.text_width f (cell_at r c) px in
+            go rest (if w > m then w else m)
+        in go cells 0 in
+      let widths = vec_new () in
+      let rec measure_cols = fn (c: int) ->
+        if c >= ncol then () else (let _ = vec_push widths (col_w c) in measure_cols (c + 1)) in
+      let _ = measure_cols 0 in
+      list_iter cells (fn (row: str list) ->
+        let rec go = fn (c: int) -> fn (x: int) ->
+          if c >= ncol then ()
+          else
+            let _ = vec_push acc (lay { text = cell_at row c, px = px, ind = x,
+                                        brk = c == ncol - 1 }) in
+            go (c + 1) (x + vec_get widths c + gap) in
+        go 0 0)
     | Hr _src -> emit "" 0 (0 - 1)     // -1 marks the rule; it has no text
     | Blank -> ()) in
   acc;
 
+let line_gap = fn (fr: frame) -> fr.h / 90;
+
+// How tall the column is. Needed twice: to centre it, and to say whether it fits.
+let height_of_lines = fn (f: font) -> fn (fr: frame) -> fn (ls: lay Vec) ->
+  let n = vec_len ls in
+  let gap = line_gap fr in
+  let rec go = fn (i: int) -> fn (acc: int) ->
+    if i >= n then acc
+    else
+      let e = vec_get ls i in
+      let hh = if e.brk == false then 0
+               else if e.ind < 0 then fr.h / 30
+               else Font.line_height f e.px + gap in
+      go (i + 1) (acc + hh) in
+  go 0 0;
+
+// Pixels by which a slide runs past the room it has, or 0. A tool that quietly
+// draws off the bottom of the page is worse than one that refuses: the deck
+// looks finished until it is on a projector. Splitting the slide automatically
+// would be worse still — it would break the talk somewhere the speaker did not
+// choose — so this reports and the writer decides.
+let overflow_of = fn (f: font) -> fn (fr: frame) -> fn (s: slide) ->
+  let h = height_of_lines f fr (lines_of f fr s) in
+  let room = fr.h - 2 * fr.pad_y in
+  if h > room then h - room else 0;
+
 let of_slide = fn (f: font) -> fn (fr: frame) -> fn (s: slide) ->
   let ls = lines_of f fr s in
   let n = vec_len ls in
-  // Total height first, so the column can be centred rather than started at a
-  // guessed offset.
-  let gap = fr.h / 90 in
-  let rec measure = fn (i: int) -> fn (acc: int) ->
-    if i >= n then acc
-    else
-      let (_t, px, ind) = vec_get ls i in
-      let hh = if ind < 0 then fr.h / 30 else Font.line_height f px + gap in
-      measure (i + 1) (acc + hh) in
-  let total = measure 0 0 in
+  let gap = line_gap fr in
+  let total = height_of_lines f fr ls in
   let top = if total >= fr.h - 2 * fr.pad_y then fr.pad_y else (fr.h - total) / 2 in
   let out = vec_new () in
   let rec place = fn (i: int) -> fn (y: int) ->
     if i >= n then ()
     else
-      let (t, px, ind) = vec_get ls i in
-      if ind < 0 then
+      let e = vec_get ls i in
+      if e.ind < 0 then
         let _ = vec_push out (Bar (fr.pad_x, y + fr.h / 60, fr.w - 2 * fr.pad_x)) in
         place (i + 1) (y + fr.h / 30)
       else
-        let lh = Font.line_height f px in
+        let lh = Font.line_height f e.px in
         // The baseline sits one ascent below the line's top, and the ascent is
         // the same number the line height was built from, so the two cannot
         // drift apart.
-        let asc = lh - Font.scale f (0 - f.descender) px in
-        let _ = if str_len t > 0 then
-                  vec_push out (Ink (t, fr.pad_x + ind, y + asc, px))
+        let asc = lh - Font.scale f (0 - f.descender) e.px in
+        let _ = if str_len e.text > 0 then
+                  vec_push out (Ink (e.text, fr.pad_x + e.ind, y + asc, e.px))
                 else () in
-        place (i + 1) (y + lh + gap) in
+        // Pieces that do not end their line share its baseline.
+        place (i + 1) (if e.brk then y + lh + gap else y) in
   let _ = place 0 top in
   out;
 
