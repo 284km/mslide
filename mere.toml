@@ -5,8 +5,8 @@ version = "0.1.0"
 
 [dependencies]
 markdown = { git = "https://github.com/284km/mere-markdown", rev = "06288f9f641b83cab979f8864237378f1684c740" }
-font = { git = "https://github.com/merelang/mere", subdir = "contrib/font", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }
-raster = { git = "https://github.com/merelang/mere", subdir = "contrib/raster", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }
-unicode = { git = "https://github.com/merelang/mere", subdir = "contrib/unicode", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }
+font = { git = "https://github.com/merelang/mere", subdir = "contrib/font", rev = "c82a8975ba38289e4fd8de4700e70b8f3b8f5b8b" }
+raster = { git = "https://github.com/merelang/mere", subdir = "contrib/raster", rev = "c82a8975ba38289e4fd8de4700e70b8f3b8f5b8b" }
+unicode = { git = "https://github.com/merelang/mere", subdir = "contrib/unicode", rev = "c82a8975ba38289e4fd8de4700e70b8f3b8f5b8b" }
 png = { git = "https://github.com/284km/mpng", rev = "3b964e279e78dd4919fdefc607090a0943b9273f" }
-window = { git = "https://github.com/merelang/mere", subdir = "contrib/window", rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778" }
+window = { git = "https://github.com/merelang/mere", subdir = "contrib/window", rev = "c82a8975ba38289e4fd8de4700e70b8f3b8f5b8b" }

@@ -4,7 +4,7 @@
 name = "font"
 git = "https://github.com/merelang/mere"
 subdir = "contrib/font"
-rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778"
+rev = "c82a8975ba38289e4fd8de4700e70b8f3b8f5b8b"
 hash = "md5:fe0e9cc9f559dbca39b9ccd7794ab450"
 
 [[package]]
@@ -29,19 +29,19 @@ hash = "md5:9d89f29ecf0f340aa7b2d63790a5534f"
 name = "raster"
 git = "https://github.com/merelang/mere"
 subdir = "contrib/raster"
-rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778"
+rev = "c82a8975ba38289e4fd8de4700e70b8f3b8f5b8b"
 hash = "md5:a0a5650eea6098d75f295810e2197632"
 
 [[package]]
 name = "unicode"
 git = "https://github.com/merelang/mere"
 subdir = "contrib/unicode"
-rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778"
+rev = "c82a8975ba38289e4fd8de4700e70b8f3b8f5b8b"
 hash = "md5:08722aabe549da0e58f92365ab9d31d8"
 
 [[package]]
 name = "window"
 git = "https://github.com/merelang/mere"
 subdir = "contrib/window"
-rev = "557314f6fd8d87f16dfba136ad27175e8c7e2778"
+rev = "c82a8975ba38289e4fd8de4700e70b8f3b8f5b8b"
 hash = "md5:460f22decfeaa367f32c1855de2eeafb"
